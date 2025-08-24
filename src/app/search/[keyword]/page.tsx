@@ -5,14 +5,62 @@ import VideoCard from "@/components/VideoCard";
 import YouTubeVideoCardSkeleton from "@/components/LoaderCard";
 import { useParams } from "next/navigation";
 
-interface YTResponseType {
-  id: { videoId: string };
-  snippet: {
-    channelId: string;
-    channelTitle: string;
-    title: string;
-    thumbnails: { high: { url: string } };
+interface YouTubeThumbnail {
+  url: string;
+  width?: number;
+  height?: number;
+}
+
+interface YouTubeSnippet {
+  channelId: string;
+  channelTitle: string;
+  title: string;
+  thumbnails: {
+    default?: YouTubeThumbnail;
+    medium?: YouTubeThumbnail;
+    high: YouTubeThumbnail;
   };
+}
+
+interface YouTubeSearchId {
+  videoId: string;
+}
+
+interface YouTubeSearchItem {
+  id: YouTubeSearchId;
+  snippet: YouTubeSnippet;
+}
+
+interface YouTubeSearchResponse {
+  items: YouTubeSearchItem[];
+}
+
+interface YouTubeVideoContentDetails {
+  duration: string;
+}
+
+interface YouTubeVideoItem {
+  id: string;
+  contentDetails: YouTubeVideoContentDetails;
+}
+
+interface YouTubeVideoResponse {
+  items: YouTubeVideoItem[];
+}
+
+interface YouTubeChannelSnippet {
+  thumbnails: {
+    default: YouTubeThumbnail;
+  };
+}
+
+interface YouTubeChannelItem {
+  id: string;
+  snippet: YouTubeChannelSnippet;
+}
+
+interface YouTubeChannelResponse {
+  items: YouTubeChannelItem[];
 }
 
 interface VideoData {
@@ -25,14 +73,13 @@ interface VideoData {
 }
 
 function formatDuration(duration: string) {
-  // duration comes in ISO 8601 (e.g. "PT5M17S")
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
 
   if (!match) return "0:00";
 
-  const hours = parseInt(match[1] || "0");
-  const minutes = parseInt(match[2] || "0");
-  const seconds = parseInt(match[3] || "0");
+  const hours = parseInt(match[1] || "0", 10);
+  const minutes = parseInt(match[2] || "0", 10);
+  const seconds = parseInt(match[3] || "0", 10);
 
   if (hours > 0) {
     return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds
@@ -43,7 +90,9 @@ function formatDuration(duration: string) {
 }
 
 function Page() {
-  const { keyword } = useParams();
+  const params = useParams<{ keyword: string }>();
+  const keyword = params.keyword;
+
   const [videos, setVideos] = useState<VideoData[]>([]);
 
   const getYtRes = async () => {
@@ -52,33 +101,33 @@ function Page() {
       const searchRes = await fetch(
         `https://www.googleapis.com/youtube/v3/search?key=${YTAPIKEY}&type=video&part=snippet&maxResults=12&q=${keyword}`
       );
-      const searchJson = await searchRes.json();
-      const items: YTResponseType[] = searchJson.items;
+      const searchJson: YouTubeSearchResponse = await searchRes.json();
+      const items = searchJson.items;
 
       const videoIds = items.map((i) => i.id.videoId).join(",");
       const channelIds = [
         ...new Set(items.map((i) => i.snippet.channelId)),
       ].join(",");
 
-      // 2. Fetch video details (for duration)
+      // 2. Fetch video details (durations)
       const videosRes = await fetch(
         `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${YTAPIKEY}`
       );
-      const videosJson = await videosRes.json();
+      const videosJson: YouTubeVideoResponse = await videosRes.json();
 
       const durations: Record<string, string> = {};
-      videosJson.items.forEach((vid: any) => {
+      videosJson.items.forEach((vid) => {
         durations[vid.id] = formatDuration(vid.contentDetails.duration);
       });
 
-      // 3. Fetch channel details (for channel icons)
+      // 3. Fetch channel details (icons)
       const channelRes = await fetch(
         `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${channelIds}&key=${YTAPIKEY}`
       );
-      const channelJson = await channelRes.json();
+      const channelJson: YouTubeChannelResponse = await channelRes.json();
 
       const channelIcons: Record<string, string> = {};
-      channelJson.items.forEach((ch: any) => {
+      channelJson.items.forEach((ch) => {
         channelIcons[ch.id] = ch.snippet.thumbnails.default.url;
       });
 
@@ -94,22 +143,26 @@ function Page() {
 
       setVideos(finalVideos);
     } catch (err) {
-      console.error(err);
+      if (err instanceof Error) {
+        console.error("YouTube fetch error:", err.message);
+      } else {
+        console.error("Unknown error fetching YouTube data:", err);
+      }
     }
   };
 
   useEffect(() => {
     getYtRes();
-  }, []);
+  }, [keyword]);
 
   return (
     <div className="min-h-[calc(100vh-50px)]">
       <div className="container mx-auto px-4">
         <div className="grid gap-6 sm:grid-cols-2 md:grid-cols-3 lg:grid-cols-4">
           {videos.length > 0 ? (
-            videos.map((item, index) => (
+            videos.map((item) => (
               <VideoCard
-                key={index}
+                key={item.videoId}
                 image={item.image}
                 title={item.title}
                 videoId={item.videoId}

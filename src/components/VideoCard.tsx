@@ -1,4 +1,5 @@
 import { Avatar, AvatarFallback, AvatarImage } from "@/components/ui/avatar";
+import Image from "next/image";
 import Link from "next/link";
 
 interface VideoProps {
@@ -22,9 +23,10 @@ export default function YouTubeVideoCard({
     <Link href={`/watch/${videoId}`} className="overflow-hidden w-full">
       {/* Video Thumbnail */}
       <div className="relative aspect-video bg-gradient-to-br from-zinc-600 to-zinc-800 overflow-hidden">
-        <img
+        <Image
           loading="lazy"
           src={image}
+          fill
           alt="Video thumbnail"
           className="w-full h-full object-cover"
         />

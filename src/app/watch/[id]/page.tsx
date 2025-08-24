@@ -3,8 +3,51 @@ import { useParams } from "next/navigation";
 import React, { useEffect, useState } from "react";
 import { YTAPIKEY } from "@/lib/env";
 import VideoList from "@/components/VideoList";
-// import YouTubeVideoCardSkeleton from "@/components/LoaderCard";
 import VideoCardSkeleton from "@/components/ListSkleton";
+
+interface YouTubeThumbnail {
+  url: string;
+  width?: number;
+  height?: number;
+}
+
+interface YouTubeSnippet {
+  channelId: string;
+  channelTitle: string;
+  title: string;
+  thumbnails: {
+    default?: YouTubeThumbnail;
+    medium?: YouTubeThumbnail;
+    high: YouTubeThumbnail;
+  };
+}
+
+interface YouTubeSearchItem {
+  id: { videoId: string };
+  snippet: YouTubeSnippet;
+}
+
+interface YouTubeSearchResponse {
+  items: YouTubeSearchItem[];
+}
+
+interface YouTubeVideoItem {
+  id: string;
+  contentDetails: { duration: string };
+}
+
+interface YouTubeVideoResponse {
+  items: YouTubeVideoItem[];
+}
+
+interface YouTubeChannelItem {
+  id: string;
+  snippet: { thumbnails: { default: YouTubeThumbnail } };
+}
+
+interface YouTubeChannelResponse {
+  items: YouTubeChannelItem[];
+}
 
 interface VideoData {
   videoId: string;
@@ -19,9 +62,9 @@ function formatDuration(duration: string) {
   const match = duration.match(/PT(?:(\d+)H)?(?:(\d+)M)?(?:(\d+)S)?/);
   if (!match) return "0:00";
 
-  const hours = parseInt(match[1] || "0");
-  const minutes = parseInt(match[2] || "0");
-  const seconds = parseInt(match[3] || "0");
+  const hours = parseInt(match[1] || "0", 10);
+  const minutes = parseInt(match[2] || "0", 10);
+  const seconds = parseInt(match[3] || "0", 10);
 
   if (hours > 0) {
     return `${hours}:${minutes.toString().padStart(2, "0")}:${seconds
@@ -32,7 +75,9 @@ function formatDuration(duration: string) {
 }
 
 export default function WatchPage() {
-  const { id } = useParams();
+  const params = useParams<{ id: string }>();
+  const id = params.id;
+
   const [suggestions, setSuggestions] = useState<VideoData[]>([]);
   const [loadingSuggestions, setLoadingSuggestions] = useState(true);
   const [loadingVideo, setLoadingVideo] = useState(true);
@@ -40,43 +85,45 @@ export default function WatchPage() {
   const fetchSuggestions = async () => {
     try {
       setLoadingSuggestions(true);
-      // 1. Get video title from YouTube
+
+      // 1. Get video title
       const videoRes = await fetch(
         `https://www.googleapis.com/youtube/v3/videos?part=snippet&id=${id}&key=${YTAPIKEY}`
       );
       const videoJson = await videoRes.json();
-      const videoTitle =
+      const videoTitle: string =
         videoJson.items?.[0]?.snippet?.title || "related videos";
 
-      // 2. Ask Gemini for a smart search query
+      // 2. Get smart query from Gemini
       const geminiRes = await fetch("/api/gemini", {
         method: "POST",
         headers: { "Content-Type": "application/json" },
         body: JSON.stringify({ title: videoTitle }),
       });
-      const { query } = await geminiRes.json();
+      const { query }: { query: string } = await geminiRes.json();
 
-      // 3. Search YouTube with Gemini’s query
+      // 3. Search YouTube
       const searchRes = await fetch(
         `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=15&q=${encodeURIComponent(
           query
         )}&key=${YTAPIKEY}`
       );
-      const searchJson = await searchRes.json();
+      const searchJson: YouTubeSearchResponse = await searchRes.json();
       const items = searchJson.items || [];
 
-      const videoIds = items.map((i: any) => i.id.videoId).join(",");
+      const videoIds = items.map((i) => i.id.videoId).join(",");
       const channelIds = [
-        ...new Set(items.map((i: any) => i.snippet.channelId)),
+        ...new Set(items.map((i) => i.snippet.channelId)),
       ].join(",");
 
       // 4. Fetch durations
       const videosRes = await fetch(
         `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${YTAPIKEY}`
       );
-      const videosJson = await videosRes.json();
+      const videosJson: YouTubeVideoResponse = await videosRes.json();
+
       const durations: Record<string, string> = {};
-      videosJson.items.forEach((vid: any) => {
+      videosJson.items.forEach((vid) => {
         durations[vid.id] = formatDuration(vid.contentDetails.duration);
       });
 
@@ -84,14 +131,15 @@ export default function WatchPage() {
       const channelRes = await fetch(
         `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${channelIds}&key=${YTAPIKEY}`
       );
-      const channelJson = await channelRes.json();
+      const channelJson: YouTubeChannelResponse = await channelRes.json();
+
       const channelIcons: Record<string, string> = {};
-      channelJson.items.forEach((ch: any) => {
+      channelJson.items.forEach((ch) => {
         channelIcons[ch.id] = ch.snippet.thumbnails.default.url;
       });
 
-      // 6. Merge into final list
-      const finalVideos: VideoData[] = items.map((item: any) => ({
+      // 6. Merge data
+      const finalVideos: VideoData[] = items.map((item) => ({
         videoId: item.id.videoId,
         title: item.snippet.title,
         image: item.snippet.thumbnails.high.url,
@@ -102,7 +150,11 @@ export default function WatchPage() {
 
       setSuggestions(finalVideos);
     } catch (err) {
-      console.error("Error fetching suggestions:", err);
+      if (err instanceof Error) {
+        console.error("Error fetching suggestions:", err.message);
+      } else {
+        console.error("Unknown error fetching suggestions:", err);
+      }
     } finally {
       setLoadingSuggestions(false);
     }
@@ -115,9 +167,9 @@ export default function WatchPage() {
   return (
     <section className="px-4 py-6">
       <div className="container mx-auto">
-        <div className="flex flex-col  lg:flex-row gap-6">
+        <div className="flex flex-col lg:flex-row gap-6">
           {/* Left - Main Video */}
-          <div className="flex-1 border-2 h-[400px] w-full">
+          <div className="flex-1 h-[500px] w-full">
             {loadingVideo && (
               <div className="w-full h-full bg-zinc-900 animate-pulse rounded-md" />
             )}
@@ -128,11 +180,11 @@ export default function WatchPage() {
               className={`w-full h-full rounded-md ${
                 loadingVideo ? "hidden" : "block"
               }`}
-              src={`https://www.youtube.com/embed/${id}?controls=1&rel=0&showinfo=0&modestbranding=1&autohide=1&rel=0`}
+              src={`https://www.youtube.com/embed/${id}?controls=1&rel=0&showinfo=0&modestbranding=1&autohide=1`}
               title="YouTube video player"
               allow="autoplay"
               allowFullScreen
-            ></iframe>
+            />
           </div>
 
           {/* Right - Suggestions */}
@@ -141,9 +193,9 @@ export default function WatchPage() {
               ? Array.from({ length: 8 }).map((_, index) => (
                   <VideoCardSkeleton key={index} />
                 ))
-              : suggestions.map((item, index) => (
+              : suggestions.map((item) => (
                   <VideoList
-                    key={index}
+                    key={item.videoId}
                     image={item.image}
                     title={item.title}
                     videoId={item.videoId}
