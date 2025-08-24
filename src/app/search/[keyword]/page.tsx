@@ -3,6 +3,7 @@ import React, { useEffect, useState } from "react";
 import { YTAPIKEY } from "@/lib/env";
 import VideoCard from "@/components/VideoCard";
 import YouTubeVideoCardSkeleton from "@/components/LoaderCard";
+import { useParams } from "next/navigation";
 
 interface YTResponseType {
   id: { videoId: string };
@@ -42,22 +43,53 @@ function formatDuration(duration: string) {
 }
 
 function Page() {
+  const { keyword } = useParams();
   const [videos, setVideos] = useState<VideoData[]>([]);
 
   const getYtRes = async () => {
     try {
-      const res = await fetch(
-        `https://www.googleapis.com/youtube/v3/videos?part=snippet,contentDetails&chart=mostPopular&maxResults=12&regionCode=IN&key=${YTAPIKEY}`
+      // 1. Search videos
+      const searchRes = await fetch(
+        `https://www.googleapis.com/youtube/v3/search?key=${YTAPIKEY}&type=video&part=snippet&maxResults=12&q=${keyword}`
       );
-      const data = await res.json();
+      const searchJson = await searchRes.json();
+      const items: YTResponseType[] = searchJson.items;
 
-      const finalVideos: VideoData[] = data.items.map((item: any) => ({
-        videoId: item.id,
+      const videoIds = items.map((i) => i.id.videoId).join(",");
+      const channelIds = [
+        ...new Set(items.map((i) => i.snippet.channelId)),
+      ].join(",");
+
+      // 2. Fetch video details (for duration)
+      const videosRes = await fetch(
+        `https://www.googleapis.com/youtube/v3/videos?part=contentDetails&id=${videoIds}&key=${YTAPIKEY}`
+      );
+      const videosJson = await videosRes.json();
+
+      const durations: Record<string, string> = {};
+      videosJson.items.forEach((vid: any) => {
+        durations[vid.id] = formatDuration(vid.contentDetails.duration);
+      });
+
+      // 3. Fetch channel details (for channel icons)
+      const channelRes = await fetch(
+        `https://www.googleapis.com/youtube/v3/channels?part=snippet&id=${channelIds}&key=${YTAPIKEY}`
+      );
+      const channelJson = await channelRes.json();
+
+      const channelIcons: Record<string, string> = {};
+      channelJson.items.forEach((ch: any) => {
+        channelIcons[ch.id] = ch.snippet.thumbnails.default.url;
+      });
+
+      // 4. Merge data
+      const finalVideos: VideoData[] = items.map((item) => ({
+        videoId: item.id.videoId,
         title: item.snippet.title,
         image: item.snippet.thumbnails.high.url,
         channel: item.snippet.channelTitle,
-        channelIcon: item.snippet.thumbnails.default.url, // fallback if you want
-        duration: formatDuration(item.contentDetails.duration),
+        channelIcon: channelIcons[item.snippet.channelId],
+        duration: durations[item.id.videoId],
       }));
 
       setVideos(finalVideos);
